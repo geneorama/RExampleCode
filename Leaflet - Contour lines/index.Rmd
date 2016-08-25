@@ -1,0 +1,73 @@
+
+## This example was developed in the context of the West Nile Virus map work. 
+
+This example was exported to the GIS Stack Exchange:
+http://gis.stackexchange.com/questions/168886/r-how-to-build-heatmap-with-the-leaflet-package/203623#203623
+
+The idea here is to use contour lines to create polygons that can be mapped in leaflet.  Normally heat maps created in javascript change with the zoom level.  These levels stay consistent. 
+
+The sample data here is motor vehicle thefts.
+
+
+```{r INITIALIZE, message=FALSE, warning=FALSE, echo=TRUE}
+library("leaflet")
+library("data.table")
+library("sp")
+library("rgdal")
+# library("maptools")
+library("KernSmooth")
+
+inurl <- "https://data.cityofchicago.org/api/views/22s8-eq8h/rows.csv?accessType=DOWNLOAD"
+infile <- "mvthefts.csv"
+
+## LOAD DATA
+## Also, clean up variable names, and convert dates
+if(!file.exists(infile)){
+    download.file(url = inurl, destfile = infile)
+}
+dat <- data.table::fread(infile)
+setnames(dat, tolower(colnames(dat)))
+setnames(dat, gsub(" ", "_", colnames(dat)))
+dat <- dat[!is.na(longitude)]
+dat[ , date := as.IDate(date, "%m/%d/%Y")]
+
+## MAKE CONTOUR LINES
+## Note, bandwidth choice is based on MASS::bandwidth.nrd()
+kde <- bkde2D(dat[ , list(longitude, latitude)],
+              bandwidth=c(.0045, .0068), gridsize = c(100,100))
+CL <- contourLines(kde$x1 , kde$x2 , kde$fhat)
+
+## EXTRACT CONTOUR LINE LEVELS
+LEVS <- as.factor(sapply(CL, `[[`, "level"))
+NLEV <- length(levels(LEVS))
+
+## CONVERT CONTOUR LINES TO POLYGONS
+pgons <- lapply(1:length(CL), function(i)
+    Polygons(list(Polygon(cbind(CL[[i]]$x, CL[[i]]$y))), ID=i))
+spgons = SpatialPolygons(pgons)
+```
+
+
+
+```{r Contour_Lines}
+## Leaflet map with polygons
+leaflet(spgons) %>% addTiles() %>% 
+    addPolygons(color = heat.colors(NLEV, NULL)[LEVS])
+```
+
+
+
+```{r Contour_Lines_wDots}
+## Leaflet map with points and polygons
+## Note, this shows some problems with the KDE, in my opinion...
+## For example there seems to be a hot spot at the intersection of Mayfield and
+## Fillmore, but it's not getting picked up.  Maybe a smaller bw is a good idea?
+
+leaflet(spgons) %>% addTiles() %>%
+    addPolygons(color = heat.colors(NLEV, NULL)[LEVS]) %>%
+    addCircles(lng = dat$longitude, lat = dat$latitude,
+               radius = .5, opacity = .2, col = "blue")
+
+```
+
+
